@@ -1,7 +1,7 @@
 #include <Arduino_FreeRTOS.h>
+#include <semphr.h>  
 
 #define qtd_comands 3
-// Criar semaforo para imprimir no terminal
 
 void get_comand(void *pvParameters);
 void list_comand(void *pvParameters);
@@ -9,33 +9,32 @@ void pisca_led( void *pvParameters);
 
 int sz_buffer = 0, flag_buffer = 0;
 char t_buffer[100], comand[108];
+char list_comands[qtd_comands][20] = {"LC", "PLED", "-PLED"};
 
-int flag = 1;
+TaskHandle_t LC, PLED;
+SemaphoreHandle_t xSerialSemaphore;
+
 void setup() {
   Serial.begin(9600);
+  
+  xSerialSemaphore = xSemaphoreCreateMutex();
+  if ( ( xSerialSemaphore ) != NULL ) xSemaphoreGive( ( xSerialSemaphore ) );
+
   xTaskCreate(get_comand, (const portCHAR *)"Terminal" , 128, NULL, 3, NULL );
-  xTaskCreate(list_comand, (const portCHAR *)"LC" , 128, NULL, 1, NULL );  
+  xTaskCreate(list_comand, (const portCHAR *)"LC" , 128, NULL, 1, &LC );  
+  xTaskCreate(pisca_led, (const portCHAR *)"PLED" , 128, NULL, 2, &PLED );
+  vTaskSuspend( LC ), vTaskSuspend( PLED );
+  
 }
 
 void read_terminal(){
- //  while(Serial.available() == 0) vTaskDelay(10);   
    while (1){
-    while(Serial.available() == 0) vTaskDelay(1);   
-    
+    while(Serial.available() == 0) vTaskDelay(5);       
     char c = Serial.read();
-    delay(10);
-    //Serial.print(" >>> ");
-   // Serial.print((int)c);
-    if((int)c == 13){ // '\n' 
-     // Serial.println("ASDAD");
-      break;
-    }t_buffer[sz_buffer++] = c;
-  }
-  t_buffer[sz_buffer] = 13;
-  delay(10);
- Serial.println(t_buffer);
-  delay(10);
-  
+    delay(1);
+    if((int)c == 13) break; // '\n' 
+    t_buffer[sz_buffer++] = c;
+  } t_buffer[sz_buffer] = 13;
   memset(comand, 0, sizeof comand);
   memcpy(comand, t_buffer, sizeof(char)*(sz_buffer));
   memset(t_buffer, 0, sizeof t_buffer);
@@ -47,7 +46,6 @@ bool cmp_str(const char * a,const char * b){
   for(int i = 0; i < strlen(a); i++){
     if(a[i] != b[i]) return 0;
   }
- // Serial.println("#####");
   return 1;
 }
 
@@ -56,32 +54,41 @@ void loop(){
 
 void list_comand(void *pvParameters){
  while(1){
-  if(flag)Serial.println("##8###");
-    vTaskDelay(1);
+  if ( xSemaphoreTake( xSerialSemaphore, ( TickType_t ) 5 ) == pdTRUE ){
+    Serial.println();
+    for(int i = 0; i < qtd_comands; i++){
+      Serial.print(list_comands[i]);    
+      Serial.print(" ");
+      vTaskDelay(1);
+    }
+    Serial.println();
+    xSemaphoreGive( xSerialSemaphore );
+    vTaskSuspend( NULL );
+  }
  }
+}
+
+void pisca_led( void *pvParameters){
+  pinMode(LED_BUILTIN, OUTPUT);
+  while(1){
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay( 1000 / portTICK_PERIOD_MS );
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay( 1000 / portTICK_PERIOD_MS ); 
+  }
 }
 
 void get_comand(void *pvParameters){
   while(1){
-    Serial.print("> ");
-    flag = 0;
-    read_terminal();
-    flag = 1;
-    vTaskDelay(1);
-    //Serial.print("@ ");  
-   // Serial.print("@ ");
-    vTaskDelay(1);
-    
-    
-   /* vTaskDelay(10);
-    if(cmp_str("lc", "lc")){
-      vTaskDelay(10);
-       Serial.println("#####");
-       delay(10000);
-       xTaskCreate(list_comand, (const portCHAR *)"LC" , 128, NULL, 0, NULL );  
-       vTaskDelay(10);
+    if ( xSemaphoreTake( xSerialSemaphore, ( TickType_t ) 5 ) == pdTRUE ){
+      Serial.print("> ");
+      read_terminal();
+      xSemaphoreGive( xSerialSemaphore );
+      if(cmp_str("PLED", comand)) vTaskResume(PLED);
+      else if(cmp_str("-PLED", comand)) vTaskSuspend(PLED);
+      else if(cmp_str("LC", comand)) vTaskResume(LC);
+      else Serial.println("ERRO!!!");
+      vTaskDelay(1);
     }
-    else Serial.println("ERRROOO");
-    vTaskDelay(10);*/
   }
 }
